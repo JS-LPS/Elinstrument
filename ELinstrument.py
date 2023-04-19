@@ -23,7 +23,7 @@ class Elinstrument:
         return self.session.read().strip()
     
     def query(self,string):
-        return self.session.query(string)
+        return self.session.query(string).strip()
     
     def find(self,string):
         devices = pyvisa.ResourceManager().list_resources()
