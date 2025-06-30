@@ -1,77 +1,145 @@
 # Classe générique ELinstru #
 
 import pyvisa
+import pyvisa.constants
 
-class Elinstrument:
+class ElInstrument:
     
     def __init__(self, address = '', timeout = 500, baudrate = 230400):
-        self.address = address
-        self.baudrate = baudrate
-        self.timeout = timeout
-        self.session = ''
+        self.rm = pyvisa.ResourceManager()
+        
+        self.instr = self.rm.open_resource(address)
+        self.session = self.instr.session
+        self.rm.visalib.set_attribute(self.session,pyvisa.constants.ResourceAttribute.timeout_value,timeout)
+
+        self.instr.write_termination = '\n'
+        self.instr.read_termination = '\n'
+        self.instr.send_end = True
+        
+        
+        """
+        if self.instr.resource_name.startswith('ASRL') :
+            print('ASRL detected : setting up IO buffers')
+            try :
+                self.rm.visalib.set_attribute(self.session,pyvisa.constants.ResourceAttribute.asrl_baud_rate,baudrate)
+                self.rm.visalib.set_buffer(self.session,pyvisa.constants.BufferType.io_in,4096)
+                self.rm.visalib.set_buffer(self.session,pyvisa.constants.BufferType.io_out,4096)
+                self.rm.visalib.flush(self.session,pyvisa.constants.BufferOperation.flush_transmit_buffer)
+                self.rm.visalib.flush(self.session,pyvisa.constants.BufferOperation.flush_write_buffer)
+            except :
+                print('Error while buffers setup')
+        """
     
-    def open(self):
-        self.session = pyvisa.ResourceManager().open_resource(self.address)
-        self.session.timeout = self.timeout
-        self.session.write_termination = '\n'
-        self.session.read_termination = '\n'
-    
+    def __del__(self):
+        try :
+            self.instr.close()
+            self.rm.close()
+        except : print('Error On Destructor')
+
     def write(self,string):
-        self.session.write(string)
+        self.instr.write(string)
 
     def read(self):
-        return self.session.read().strip()
+        try : ack = self.instr.read().strip()
+        except : ack = "Error On Read"
+        finally : return ack
     
     def query(self,string):
-        return self.session.query(string).strip()
-    
-    def find(self,string):
-        devices = pyvisa.ResourceManager().list_resources()
-    
+            self.instr.write(string)
+            try : ack = self.instr.read().strip()
+            except : ack = "Error On Query : " + string
+            finally : return ack
+
     def close(self):
-        self.session.close()
+        self.instr.close()
+        self.rm.close()
         
     def clear(self):
-        self.session.clear()
+        self.instr.clear()
     
-    def reverse(self, tuples):
-        return tuples[::-1]
-
-    def find_device(self, mystring):
+    def find(string, baudrate):
         res = 'Not Found'
-        devices = self.reverse(pyvisa.ResourceManager().list_resources())
-        print('Devices list : ', devices)
-        for device in devices :
-            instr = pyvisa.ResourceManager().open_resource(device, open_timeout=500)
-            instr.write_termination = '\n'
-            instr.read_termination = '\n'
-            idn = ''
+        rm = pyvisa.ResourceManager()
+        devices = rm.list_resources()
+        # print('Devices list : ', devices)
+        for device in devices[::-1] : 
             try :
-                idn = (instr.query('*IDN?'))
+                instr = rm.open_resource(device,open_timeout=200)
+                rm.visalib.set_attribute(instr.session,pyvisa.constants.ResourceAttribute.asrl_baud_rate,baudrate)
+                rm.visalib.set_attribute(instr.session,pyvisa.constants.ResourceAttribute.timeout_value,200)
+                rm.visalib.set_buffer(instr.session,pyvisa.constants.BufferType.io_in,4096)
+                rm.visalib.set_buffer(instr.session,pyvisa.constants.BufferType.io_out,4096)
+                rm.visalib.flush(instr.session,pyvisa.constants.BufferOperation.flush_transmit_buffer)
+                rm.visalib.flush(instr.session,pyvisa.constants.BufferOperation.flush_write_buffer)
+
+                instr.write_termination = '\n'
+                instr.read_termination = '\n'
+                instr.send_end = True
+                idn = ''
+
+                try :
+                    idn = (instr.query('*IDN?'))
+                    print('Successful query on',device,' ==> ',idn.strip())
+                except :
+                    print('Error on query',device,'...')
+                finally :
+                    if idn.find(string) != -1:
+                        print("Device '",string, "' found on",device,'\n')
+                        res = device
+                        instr.close()
+                        break
+                    else :
+                        print('\n')
             except :
-                print('Error on ', device)
-            finally :
-                if idn.find(mystring) != -1:
-                    res = device
-                    print("Device '", mystring, "' found on", res)
-                    break
-                instr.close()
+                    print('Error on opening', device,'...')
         return res
 
 # EXEMPLES #
 
-"""
-nanoBLE = Elinstrument(Elinstrument().find_device('2021_ELINS_NanoBLE'), 200, 230400)
-nanoBLE.open()
-print('IDN ==> ',nanoBLE.query('*IDN?'))
-print('STATUS ==> ',nanoBLE.query('TH?'))
-nanoBLE.close()
-"""
+DEVICE_ADDR = 'ASRL14::INSTR'
 
 """
-biaxiale = Elinstrument('TCPIP0::192.168.142.71::80::SOCKET', 2000)
-biaxiale.open()
-print('IDN ==> ',biaxiale.query('*IDN?'))
-print('STATUS ==> ',biaxiale.query('STATUS?'))
-biaxiale.close()
+print('\n--- TEST RAW ---\n')
+rm = pyvisa.ResourceManager()
+Pouet =  rm.open_resource(DEVICE_ADDR, baud_rate = 230400, timeout = 200)
+#Pouet =  rm.open_resource('TCPIP0::192.168.142.74::80::SOCKET', timeout = 1000)
+Pouet.write_termination = '\n'
+Pouet.read_termination = '\n'
+Pouet.send_end = True
+
+if Pouet.resource_name.startswith('ASRL') :
+            print('ASRL detected : setting up IO buffers')
+            rm.visalib.set_buffer(Pouet.session,16,1024)
+            rm.visalib.set_buffer(Pouet.session,32,1024)
+            rm.visalib.flush(Pouet.session,32)
+            rm.visalib.flush(Pouet.session,2)
+
+print('IDN request ==> ',Pouet.query('*IDN?'))
+Pouet.close()
+rm.close()
+print('\n--- FIN TEST Raw ---\n')
 """
+
+#__________________________________________________________________________________
+
+
+"""
+print('\n--- TEST Wrapper ---\n')
+Pouet = ElInstrument(DEVICE_ADDR, 200, 230400)
+#Pouet = ElInstrument('TCPIP0::192.168.142.74::80::SOCKET', 2000)
+print('IDN request ==> ',Pouet.query('*IDN?'))
+del Pouet
+print('\n--- FIN TEST Wrapper ---\n')
+"""
+
+#__________________________________________________________________________________
+
+"""
+print('\n--- TEST Find ---\n')
+#ElInstrument.find('2021_ELINS_NanoBLE',230400)
+#ElInstrument.find('NanoBLE',230400)
+ElInstrument.find('Mbed',230400)
+Pouet = ElInstrument(ElInstrument.find('Mbed',230400), 200, 230400)
+print('IDN request ==> ',Pouet.query('*IDN?'))
+del Pouet
+print('\n--- FIN TEST Find ---\n')"""
